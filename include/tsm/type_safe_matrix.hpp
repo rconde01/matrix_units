@@ -147,20 +147,16 @@ public:
         requires (N <= num_rows) && (num_cols == 1)
     [[nodiscard]] auto head() const {
         using SubRows = detail::head_t<RowIdxList_, N>;
-        TypeSafeMatrix<Scalar_, SubRows, ColIdxList_, MatrixTag_, StoragePolicy_> result;
-        for (std::size_t i = 0; i < N; ++i)
-            result.rawAt(i, 0) = storage_(i, 0);
-        return result;
+        return TypeSafeMatrix<Scalar_, SubRows, ColIdxList_, MatrixTag_, StoragePolicy_>{
+            storage_.template block<0, 0, N, 1>()};
     }
 
     template <std::size_t N>
         requires (N <= num_rows) && (num_cols == 1)
     [[nodiscard]] auto tail() const {
         using SubRows = detail::tail_t<RowIdxList_, num_rows - N>;
-        TypeSafeMatrix<Scalar_, SubRows, ColIdxList_, MatrixTag_, StoragePolicy_> result;
-        for (std::size_t i = 0; i < N; ++i)
-            result.rawAt(i, 0) = storage_(num_rows - N + i, 0);
-        return result;
+        return TypeSafeMatrix<Scalar_, SubRows, ColIdxList_, MatrixTag_, StoragePolicy_>{
+            storage_.template block<num_rows - N, 0, N, 1>()};
     }
 
     template <std::size_t RowStart, std::size_t RowCount,
@@ -170,41 +166,28 @@ public:
     [[nodiscard]] auto block() const {
         using SubRows = detail::sub_list_t<RowIdxList_, RowStart, RowCount>;
         using SubCols = detail::sub_list_t<ColIdxList_, ColStart, ColCount>;
-        TypeSafeMatrix<Scalar_, SubRows, SubCols, MatrixTag_, StoragePolicy_> result;
-        for (std::size_t r = 0; r < RowCount; ++r)
-            for (std::size_t c = 0; c < ColCount; ++c)
-                result.rawAt(r, c) = storage_(RowStart + r, ColStart + c);
-        return result;
+        return TypeSafeMatrix<Scalar_, SubRows, SubCols, MatrixTag_, StoragePolicy_>{
+            storage_.template block<RowStart, ColStart, RowCount, ColCount>()};
     }
 
     template <typename Other>
         requires detail::Addable<TypeSafeMatrix, Other>
     [[nodiscard]] auto operator+(const Other& other) const {
         using ResultTag = addition_result_tag_t<MatrixTag_, typename Other::tag_type>;
-        TypeSafeMatrix<Scalar_, RowIdxList_, ColIdxList_, ResultTag, StoragePolicy_> result;
-        for (std::size_t r = 0; r < num_rows; ++r)
-            for (std::size_t c = 0; c < num_cols; ++c)
-                result.rawAt(r, c) = storage_(r, c) + other.rawAt(r, c);
-        return result;
+        return TypeSafeMatrix<Scalar_, RowIdxList_, ColIdxList_, ResultTag, StoragePolicy_>{
+            storage_ + other.storage()};
     }
 
     template <typename Other>
         requires detail::Subtractable<TypeSafeMatrix, Other>
     [[nodiscard]] auto operator-(const Other& other) const {
         using ResultTag = subtraction_result_tag_t<MatrixTag_, typename Other::tag_type>;
-        TypeSafeMatrix<Scalar_, RowIdxList_, ColIdxList_, ResultTag, StoragePolicy_> result;
-        for (std::size_t r = 0; r < num_rows; ++r)
-            for (std::size_t c = 0; c < num_cols; ++c)
-                result.rawAt(r, c) = storage_(r, c) - other.rawAt(r, c);
-        return result;
+        return TypeSafeMatrix<Scalar_, RowIdxList_, ColIdxList_, ResultTag, StoragePolicy_>{
+            storage_ - other.storage()};
     }
 
     [[nodiscard]] TypeSafeMatrix operator*(Scalar_ s) const {
-        TypeSafeMatrix result;
-        for (std::size_t r = 0; r < num_rows; ++r)
-            for (std::size_t c = 0; c < num_cols; ++c)
-                result.rawAt(r, c) = storage_(r, c) * s;
-        return result;
+        return TypeSafeMatrix{storage_ * s};
     }
 
     friend TypeSafeMatrix operator*(Scalar_ s, const TypeSafeMatrix& m) {
@@ -212,11 +195,7 @@ public:
     }
 
     [[nodiscard]] TypeSafeMatrix operator/(Scalar_ s) const {
-        TypeSafeMatrix result;
-        for (std::size_t r = 0; r < num_rows; ++r)
-            for (std::size_t c = 0; c < num_cols; ++c)
-                result.rawAt(r, c) = storage_(r, c) / s;
-        return result;
+        return TypeSafeMatrix{storage_ / s};
     }
 
     template <typename Other>
@@ -224,42 +203,22 @@ public:
     [[nodiscard]] auto operator*(const Other& other) const {
         using ResultTag = multiplication_result_tag_t<MatrixTag_, typename Other::tag_type>;
         using ResultCols = typename Other::col_idx_list;
-        constexpr auto other_cols = Other::num_cols;
-
-        TypeSafeMatrix<Scalar_, RowIdxList_, ResultCols, ResultTag, StoragePolicy_> result;
-        for (std::size_t r = 0; r < num_rows; ++r)
-            for (std::size_t c = 0; c < other_cols; ++c) {
-                Scalar_ sum{};
-                for (std::size_t k = 0; k < num_cols; ++k)
-                    sum += storage_(r, k) * other.rawAt(k, c);
-                result.rawAt(r, c) = sum;
-            }
-        return result;
+        return TypeSafeMatrix<Scalar_, RowIdxList_, ResultCols, ResultTag, StoragePolicy_>{
+            storage_.multiply(other.storage())};
     }
 
     [[nodiscard]] TypeSafeMatrix operator-() const {
-        TypeSafeMatrix result;
-        for (std::size_t r = 0; r < num_rows; ++r)
-            for (std::size_t c = 0; c < num_cols; ++c)
-                result.rawAt(r, c) = -storage_(r, c);
-        return result;
+        return TypeSafeMatrix{-storage_};
     }
 
     [[nodiscard]] auto transpose() const {
         using TTag = transpose_tag_t<MatrixTag_>;
-        TypeSafeMatrix<Scalar_, ColIdxList_, RowIdxList_, TTag, StoragePolicy_> result;
-        for (std::size_t r = 0; r < num_rows; ++r)
-            for (std::size_t c = 0; c < num_cols; ++c)
-                result.rawAt(c, r) = storage_(r, c);
-        return result;
+        return TypeSafeMatrix<Scalar_, ColIdxList_, RowIdxList_, TTag, StoragePolicy_>{
+            storage_.transpose()};
     }
 
     [[nodiscard]] bool operator==(const TypeSafeMatrix& other) const {
-        for (std::size_t r = 0; r < num_rows; ++r)
-            for (std::size_t c = 0; c < num_cols; ++c)
-                if (storage_(r, c) != other.storage_(r, c))
-                    return false;
-        return true;
+        return storage_ == other.storage_;
     }
 
     [[nodiscard]] static TypeSafeMatrix zero() {
@@ -269,28 +228,19 @@ public:
     [[nodiscard]] static TypeSafeMatrix identity()
         requires (num_rows == num_cols)
     {
-        TypeSafeMatrix result;
-        for (std::size_t i = 0; i < num_rows; ++i)
-            result.rawAt(i, i) = Scalar_{1};
-        return result;
+        return TypeSafeMatrix{storage_type::identity()};
     }
 
     [[nodiscard]] Scalar_ squaredNorm() const
         requires (num_cols == 1)
     {
-        Scalar_ sum{};
-        for (std::size_t i = 0; i < num_rows; ++i)
-            sum += storage_(i, 0) * storage_(i, 0);
-        return sum;
+        return storage_.squaredNorm();
     }
 
     template <typename Other>
         requires detail::Addable<TypeSafeMatrix, Other> && (num_cols == 1)
     [[nodiscard]] Scalar_ dot(const Other& other) const {
-        Scalar_ sum{};
-        for (std::size_t i = 0; i < num_rows; ++i)
-            sum += storage_(i, 0) * other.rawAt(i, 0);
-        return sum;
+        return storage_.dot(other.storage());
     }
 
 private:

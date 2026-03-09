@@ -36,6 +36,66 @@ public:
     [[nodiscard]] bool operator==(const EigenStorage& other) const {
         return matrix_ == other.matrix_;
     }
+
+    [[nodiscard]] EigenStorage operator+(const EigenStorage& other) const {
+        return EigenStorage{(matrix_ + other.matrix_).eval()};
+    }
+
+    [[nodiscard]] EigenStorage operator-(const EigenStorage& other) const {
+        return EigenStorage{(matrix_ - other.matrix_).eval()};
+    }
+
+    [[nodiscard]] EigenStorage operator-() const {
+        return EigenStorage{(-matrix_).eval()};
+    }
+
+    [[nodiscard]] EigenStorage operator*(Scalar_ s) const {
+        return EigenStorage{(matrix_ * s).eval()};
+    }
+
+    friend EigenStorage operator*(Scalar_ s, const EigenStorage& m) {
+        return m * s;
+    }
+
+    [[nodiscard]] EigenStorage operator/(Scalar_ s) const {
+        return EigenStorage{(matrix_ / s).eval()};
+    }
+
+    template <std::size_t OtherCols>
+    [[nodiscard]] EigenStorage<Scalar_, Rows_, OtherCols>
+    multiply(const EigenStorage<Scalar_, Cols_, OtherCols>& other) const {
+        return EigenStorage<Scalar_, Rows_, OtherCols>{(matrix_ * other.eigen()).eval()};
+    }
+
+    [[nodiscard]] EigenStorage<Scalar_, Cols_, Rows_> transpose() const {
+        return EigenStorage<Scalar_, Cols_, Rows_>{matrix_.transpose().eval()};
+    }
+
+    [[nodiscard]] Scalar_ squaredNorm() const
+        requires (Cols_ == 1)
+    {
+        return matrix_.squaredNorm();
+    }
+
+    [[nodiscard]] Scalar_ dot(const EigenStorage& other) const
+        requires (Cols_ == 1)
+    {
+        return matrix_.dot(other.matrix_);
+    }
+
+    [[nodiscard]] static EigenStorage identity()
+        requires (Rows_ == Cols_)
+    {
+        return EigenStorage{EigenMatrix::Identity()};
+    }
+
+    template <std::size_t StartRow, std::size_t StartCol, std::size_t BlockRows, std::size_t BlockCols>
+        requires (StartRow + BlockRows <= Rows_) && (StartCol + BlockCols <= Cols_)
+    [[nodiscard]] EigenStorage<Scalar_, BlockRows, BlockCols> block() const {
+        return EigenStorage<Scalar_, BlockRows, BlockCols>{
+            matrix_.template block<static_cast<int>(BlockRows), static_cast<int>(BlockCols)>(
+                static_cast<int>(StartRow), static_cast<int>(StartCol)).eval()};
+    }
 };
 
 struct EigenStoragePolicy {
