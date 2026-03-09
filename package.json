@@ -1,0 +1,14 @@
+{
+  "name": "matrix-units",
+  "version": "1.0.0",
+  "description": "Type-safe matrix library with compile-time dimension checking",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "node --experimental-vm-modules node_modules/.bin/jest",
+    "lint": "tsc --noEmit"
+  },
+  "keywords": ["matrix", "linear-algebra", "type-safe", "typescript"],
+  "license": "MIT"
+}

@@ -1,0 +1,16 @@
+export {
+  Matrix,
+  matrix,
+  zeros,
+  ones,
+  identity,
+  add,
+  subtract,
+  multiply,
+  scale,
+  transpose,
+  get,
+  determinant,
+  equals,
+  toString,
+} from "./matrix";
