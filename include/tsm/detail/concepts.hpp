@@ -34,10 +34,30 @@ concept Addable = IsTypeSafeMatrix<A> && IsTypeSafeMatrix<B> &&
     (std::remove_cvref_t<A>::tag_type::row_exponent ==
      std::remove_cvref_t<B>::tag_type::row_exponent) &&
     (std::remove_cvref_t<A>::tag_type::col_exponent ==
-     std::remove_cvref_t<B>::tag_type::col_exponent);
+     std::remove_cvref_t<B>::tag_type::col_exponent) &&
+    requires {
+        typename addition_result_tag_t<
+            typename std::remove_cvref_t<A>::tag_type,
+            typename std::remove_cvref_t<B>::tag_type>;
+    };
 
 template <typename A, typename B>
-concept Subtractable = Addable<A, B>;
+concept Subtractable = IsTypeSafeMatrix<A> && IsTypeSafeMatrix<B> &&
+    std::same_as<typename std::remove_cvref_t<A>::scalar_type,
+                 typename std::remove_cvref_t<B>::scalar_type> &&
+    are_identical_v<typename std::remove_cvref_t<A>::row_idx_list,
+                    typename std::remove_cvref_t<B>::row_idx_list> &&
+    are_identical_v<typename std::remove_cvref_t<A>::col_idx_list,
+                    typename std::remove_cvref_t<B>::col_idx_list> &&
+    (std::remove_cvref_t<A>::tag_type::row_exponent ==
+     std::remove_cvref_t<B>::tag_type::row_exponent) &&
+    (std::remove_cvref_t<A>::tag_type::col_exponent ==
+     std::remove_cvref_t<B>::tag_type::col_exponent) &&
+    requires {
+        typename subtraction_result_tag_t<
+            typename std::remove_cvref_t<A>::tag_type,
+            typename std::remove_cvref_t<B>::tag_type>;
+    };
 
 template <typename A, typename B>
 concept Multipliable = IsTypeSafeMatrix<A> && IsTypeSafeMatrix<B> &&
@@ -46,7 +66,12 @@ concept Multipliable = IsTypeSafeMatrix<A> && IsTypeSafeMatrix<B> &&
     are_identical_v<typename std::remove_cvref_t<A>::col_idx_list,
                     typename std::remove_cvref_t<B>::row_idx_list> &&
     (std::remove_cvref_t<A>::tag_type::col_exponent +
-     std::remove_cvref_t<B>::tag_type::row_exponent == 0);
+     std::remove_cvref_t<B>::tag_type::row_exponent == 0) &&
+    requires {
+        typename multiplication_result_tag_t<
+            typename std::remove_cvref_t<A>::tag_type,
+            typename std::remove_cvref_t<B>::tag_type>;
+    };
 
 } // namespace detail
 } // namespace tsm

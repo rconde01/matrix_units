@@ -436,6 +436,149 @@ void test_isometry_inverse() {
     std::printf("OK\n");
 }
 
+// =========================================================================
+// Compile-time negative tests: verify that invalid operations are rejected
+// =========================================================================
+// GCC 13 has a bug where requires-expressions containing constrained template
+// operators emit hard errors instead of evaluating to false. Use void_t-based
+// SFINAE traits as a portable workaround.
+
+namespace neg_tests {
+
+template <typename A, typename B, typename = void>
+struct can_add : std::false_type {};
+template <typename A, typename B>
+struct can_add<A, B, std::void_t<decltype(std::declval<A>() + std::declval<B>())>> : std::true_type {};
+
+template <typename A, typename B, typename = void>
+struct can_sub : std::false_type {};
+template <typename A, typename B>
+struct can_sub<A, B, std::void_t<decltype(std::declval<A>() - std::declval<B>())>> : std::true_type {};
+
+template <typename A, typename B, typename = void>
+struct can_mul : std::false_type {};
+template <typename A, typename B>
+struct can_mul<A, B, std::void_t<decltype(std::declval<A>() * std::declval<B>())>> : std::true_type {};
+
+template <typename V, typename Idx, typename = void>
+struct can_at : std::false_type {};
+template <typename V, typename Idx>
+struct can_at<V, Idx, std::void_t<decltype(std::declval<V>().template at<Idx>())>> : std::true_type {};
+
+template <typename V, typename RowIdx, typename ColIdx, typename = void>
+struct can_at2 : std::false_type {};
+template <typename V, typename RowIdx, typename ColIdx>
+struct can_at2<V, RowIdx, ColIdx, std::void_t<decltype(std::declval<V>().template at<RowIdx, ColIdx>())>> : std::true_type {};
+
+template <typename V, typename E, typename = void>
+struct can_assign_entry : std::false_type {};
+template <typename V, typename E>
+struct can_assign_entry<V, E, std::void_t<decltype(std::declval<V>().assignEntry(std::declval<E>()))>> : std::true_type {};
+
+template <typename A, typename B, typename = void>
+struct can_dot : std::false_type {};
+template <typename A, typename B>
+struct can_dot<A, B, std::void_t<decltype(std::declval<A>().dot(std::declval<B>()))>> : std::true_type {};
+
+} // namespace neg_tests
+
+// --- Vector addition / subtraction constraints ---
+
+// Cannot add two position vectors (point + point is meaningless)
+static_assert(!neg_tests::can_add<PosVec3Vehicle, PosVec3Vehicle>::value,
+    "Adding two position vectors (VectorTag + VectorTag) must not compile");
+
+// Cannot add vectors from different coordinate frames
+static_assert(!neg_tests::can_add<DeltaPosVec3Vehicle, DeltaPosVec3Sensor>::value,
+    "Adding vectors from different frames must not compile");
+
+static_assert(!neg_tests::can_add<PosVec3Vehicle, DeltaPosVec3Sensor>::value,
+    "Adding point + delta from different frames must not compile");
+
+// Cannot subtract vectors from different frames
+static_assert(!neg_tests::can_sub<PosVec3Vehicle, PosVec3Sensor>::value,
+    "Subtracting vectors from different frames must not compile");
+
+// Cannot add vectors with different dimensions
+static_assert(!neg_tests::can_add<PosVec3Vehicle, PosVec2Vehicle>::value,
+    "Adding vectors with different dimensions must not compile");
+
+// Cannot add Jacobian to Covariance (different tag exponents)
+static_assert(!neg_tests::can_add<SensorToVehicleJac, CovPos2Vehicle>::value,
+    "Adding Jacobian + Covariance must not compile");
+
+// --- Matrix multiplication constraints ---
+
+// Cannot multiply matrices with mismatched inner index lists
+static_assert(!neg_tests::can_mul<SensorToVehicleJac, CovPos3Vehicle>::value,
+    "Multiplying matrices with mismatched inner dimensions must not compile");
+
+// Cannot multiply Covariance * Covariance (col_exponent + row_exponent != 0)
+static_assert(!neg_tests::can_mul<CovPos2Vehicle, CovPos2Vehicle>::value,
+    "Multiplying Covariance * Covariance must not compile");
+
+// Cannot multiply Covariance * Jacobian (wrong exponent pairing)
+static_assert(!neg_tests::can_mul<CovPos2Vehicle, SensorToVehicleJac>::value,
+    "Multiplying Covariance * Jacobian must not compile");
+
+// --- Index access constraints ---
+
+// Cannot access a sensor-frame index on a vehicle-frame vector
+static_assert(!neg_tests::can_at<PosVec3Vehicle, DX_S>::value,
+    "Accessing sensor index on vehicle vector must not compile");
+
+// Cannot access a vehicle-frame index on a sensor-frame vector
+static_assert(!neg_tests::can_at<PosVec3Sensor, DX>::value,
+    "Accessing vehicle index on sensor vector must not compile");
+
+// Cannot access velocity index on a position vector
+static_assert(!neg_tests::can_at<PosVec3Vehicle, VX>::value,
+    "Accessing velocity index on position vector must not compile");
+
+// Cannot access wrong column index on a matrix
+static_assert(!neg_tests::can_at2<CovPos2Vehicle, DX, DX_S>::value,
+    "Accessing wrong column index on matrix must not compile");
+
+// --- Entry type safety ---
+
+// Cannot assign a sensor-frame entry to a vehicle-frame vector
+static_assert(!neg_tests::can_assign_entry<PosVec3Vehicle, tsm::Entry<DX_S, double>>::value,
+    "Assigning sensor entry to vehicle vector must not compile");
+
+// --- Isometry constraints ---
+
+using IsoVehicleFromSensor = tsm::Isometry<double, VehicleIdxList3, SensorIdxList3>;
+using IsoSensorFromOdom = tsm::Isometry<double, SensorIdxList3, OdomIdxList3>;
+
+// Cannot apply vehicle<-sensor isometry to a vehicle-frame position
+static_assert(!neg_tests::can_mul<IsoVehicleFromSensor, PosVec3Vehicle>::value,
+    "Applying vehicle<-sensor isometry to vehicle position must not compile");
+
+// Cannot apply vehicle<-sensor isometry to an odom-frame position
+static_assert(!neg_tests::can_mul<IsoVehicleFromSensor, PosVec3Odom>::value,
+    "Applying vehicle<-sensor isometry to odom position must not compile");
+
+// Cannot compose isometries with mismatched intermediate frames
+// vehicle<-sensor * vehicle<-sensor (sensor != vehicle)
+static_assert(!neg_tests::can_mul<IsoVehicleFromSensor, IsoVehicleFromSensor>::value,
+    "Composing isometries with mismatched intermediate frames must not compile");
+
+// Cannot compose sensor<-odom * vehicle<-sensor (wrong order)
+static_assert(!neg_tests::can_mul<IsoSensorFromOdom, IsoVehicleFromSensor>::value,
+    "Composing isometries in wrong order must not compile");
+
+// --- Dot product / norm constraints ---
+
+// Cannot dot product vectors from different frames
+static_assert(!neg_tests::can_dot<DeltaPosVec3Vehicle, DeltaPosVec3Sensor>::value,
+    "Dot product of vectors from different frames must not compile");
+
+// Cannot take dot product of matrices (not vectors)
+static_assert(!neg_tests::can_dot<CovPos2Vehicle, CovPos2Vehicle>::value,
+    "Dot product on matrices must not compile");
+
+// =========================================================================
+
 int main() {
     std::printf("TypeSafeMatrix tests:\n");
 
