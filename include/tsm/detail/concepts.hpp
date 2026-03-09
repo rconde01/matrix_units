@@ -9,7 +9,7 @@
 namespace tsm {
 
 template <typename Scalar, typename RowIdxList, typename ColIdxList,
-          IsMatrixTag MatrixTag, typename StoragePolicy>
+          IsMatrixTag MatrixTag, typename Storage>
 class TypeSafeMatrix;
 
 namespace detail {
@@ -17,8 +17,8 @@ namespace detail {
 template <typename T>
 struct IsTypeSafeMatrixImpl : std::false_type {};
 
-template <typename S, typename R, typename C, IsMatrixTag M, typename SP>
-struct IsTypeSafeMatrixImpl<TypeSafeMatrix<S, R, C, M, SP>> : std::true_type {};
+template <typename S, typename R, typename C, IsMatrixTag M, typename St>
+struct IsTypeSafeMatrixImpl<TypeSafeMatrix<S, R, C, M, St>> : std::true_type {};
 
 template <typename T>
 concept IsTypeSafeMatrix = IsTypeSafeMatrixImpl<std::remove_cvref_t<T>>::value;

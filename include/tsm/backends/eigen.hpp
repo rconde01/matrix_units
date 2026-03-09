@@ -1,106 +1,118 @@
 #pragma once
 
 #include <Eigen/Core>
+#include <concepts>
 #include <cstddef>
+#include <type_traits>
 
 namespace tsm::detail {
 
-template <typename Scalar_, std::size_t Rows_, std::size_t Cols_>
+template <typename EigenType_>
 class EigenStorage {
-public:
-    using Scalar = Scalar_;
-    static constexpr std::size_t Rows = Rows_;
-    static constexpr std::size_t Cols = Cols_;
-    using EigenMatrix = Eigen::Matrix<Scalar_, static_cast<int>(Rows_), static_cast<int>(Cols_)>;
-
-private:
-    EigenMatrix matrix_ = EigenMatrix::Zero();
+    EigenType_ data_;
 
 public:
-    EigenStorage() = default;
+    using Scalar = typename EigenType_::Scalar;
+    using EigenType = EigenType_;
+    static constexpr std::size_t Rows = static_cast<std::size_t>(EigenType_::RowsAtCompileTime);
+    static constexpr std::size_t Cols = static_cast<std::size_t>(EigenType_::ColsAtCompileTime);
 
-    explicit EigenStorage(const EigenMatrix& m) : matrix_(m) {}
-    explicit EigenStorage(EigenMatrix&& m) : matrix_(std::move(m)) {}
+    EigenStorage()
+        requires requires { EigenType_::Zero(); }
+        : data_(EigenType_::Zero()) {}
 
-    [[nodiscard]] Scalar_& operator()(std::size_t row, std::size_t col) {
-        return matrix_(static_cast<Eigen::Index>(row), static_cast<Eigen::Index>(col));
+    explicit EigenStorage(const EigenType_& e) : data_(e) {}
+    explicit EigenStorage(EigenType_&& e) : data_(std::move(e)) {}
+
+    // Converting constructor: evaluates expression-typed storage into concrete storage
+    template <typename OtherEigenType>
+        requires (!std::same_as<std::remove_const_t<EigenType_>,
+                                std::remove_const_t<OtherEigenType>>)
+    EigenStorage(const EigenStorage<OtherEigenType>& other) : data_(other.eigen()) {}
+
+    [[nodiscard]] Scalar& operator()(std::size_t row, std::size_t col) {
+        return data_(static_cast<Eigen::Index>(row), static_cast<Eigen::Index>(col));
     }
 
-    [[nodiscard]] const Scalar_& operator()(std::size_t row, std::size_t col) const {
-        return matrix_(static_cast<Eigen::Index>(row), static_cast<Eigen::Index>(col));
+    [[nodiscard]] const Scalar& operator()(std::size_t row, std::size_t col) const {
+        return data_(static_cast<Eigen::Index>(row), static_cast<Eigen::Index>(col));
     }
 
-    [[nodiscard]] const EigenMatrix& eigen() const { return matrix_; }
-    [[nodiscard]] EigenMatrix& eigen() { return matrix_; }
+    [[nodiscard]] const EigenType_& eigen() const { return data_; }
+    [[nodiscard]] EigenType_& eigen() { return data_; }
 
     [[nodiscard]] bool operator==(const EigenStorage& other) const {
-        return matrix_ == other.matrix_;
+        return data_ == other.data_;
     }
 
-    [[nodiscard]] EigenStorage operator+(const EigenStorage& other) const {
-        return EigenStorage{(matrix_ + other.matrix_).eval()};
+    // Arithmetic operations return expression-typed EigenStorage (no eager evaluation)
+
+    template <typename OtherType>
+    [[nodiscard]] auto operator+(const EigenStorage<OtherType>& other) const {
+        return EigenStorage<decltype(data_ + other.eigen())>{data_ + other.eigen()};
     }
 
-    [[nodiscard]] EigenStorage operator-(const EigenStorage& other) const {
-        return EigenStorage{(matrix_ - other.matrix_).eval()};
+    template <typename OtherType>
+    [[nodiscard]] auto operator-(const EigenStorage<OtherType>& other) const {
+        return EigenStorage<decltype(data_ - other.eigen())>{data_ - other.eigen()};
     }
 
-    [[nodiscard]] EigenStorage operator-() const {
-        return EigenStorage{(-matrix_).eval()};
+    [[nodiscard]] auto operator-() const {
+        return EigenStorage<decltype(-data_)>{-data_};
     }
 
-    [[nodiscard]] EigenStorage operator*(Scalar_ s) const {
-        return EigenStorage{(matrix_ * s).eval()};
+    [[nodiscard]] auto operator*(Scalar s) const {
+        return EigenStorage<decltype(data_ * s)>{data_ * s};
     }
 
-    friend EigenStorage operator*(Scalar_ s, const EigenStorage& m) {
-        return m * s;
+    friend auto operator*(Scalar s, const EigenStorage& m) {
+        return EigenStorage<decltype(s * m.data_)>{s * m.data_};
     }
 
-    [[nodiscard]] EigenStorage operator/(Scalar_ s) const {
-        return EigenStorage{(matrix_ / s).eval()};
+    [[nodiscard]] auto operator/(Scalar s) const {
+        return EigenStorage<decltype(data_ / s)>{data_ / s};
     }
 
-    template <std::size_t OtherCols>
-    [[nodiscard]] EigenStorage<Scalar_, Rows_, OtherCols>
-    multiply(const EigenStorage<Scalar_, Cols_, OtherCols>& other) const {
-        return EigenStorage<Scalar_, Rows_, OtherCols>{(matrix_ * other.eigen()).eval()};
+    template <typename OtherType>
+    [[nodiscard]] auto multiply(const EigenStorage<OtherType>& other) const {
+        return EigenStorage<decltype(data_ * other.eigen())>{data_ * other.eigen()};
     }
 
-    [[nodiscard]] EigenStorage<Scalar_, Cols_, Rows_> transpose() const {
-        return EigenStorage<Scalar_, Cols_, Rows_>{matrix_.transpose().eval()};
+    [[nodiscard]] auto transpose() const {
+        return EigenStorage<decltype(data_.transpose())>{data_.transpose()};
     }
 
-    [[nodiscard]] Scalar_ squaredNorm() const
-        requires (Cols_ == 1)
+    [[nodiscard]] Scalar squaredNorm() const
+        requires (Cols == 1)
     {
-        return matrix_.squaredNorm();
+        return data_.squaredNorm();
     }
 
-    [[nodiscard]] Scalar_ dot(const EigenStorage& other) const
-        requires (Cols_ == 1)
+    template <typename OtherType>
+    [[nodiscard]] Scalar dot(const EigenStorage<OtherType>& other) const
+        requires (Cols == 1)
     {
-        return matrix_.dot(other.matrix_);
+        return data_.dot(other.eigen());
     }
 
     [[nodiscard]] static EigenStorage identity()
-        requires (Rows_ == Cols_)
+        requires (Rows == Cols) && requires { EigenType_::Identity(); }
     {
-        return EigenStorage{EigenMatrix::Identity()};
+        return EigenStorage{EigenType_::Identity()};
     }
 
     template <std::size_t StartRow, std::size_t StartCol, std::size_t BlockRows, std::size_t BlockCols>
-        requires (StartRow + BlockRows <= Rows_) && (StartCol + BlockCols <= Cols_)
-    [[nodiscard]] EigenStorage<Scalar_, BlockRows, BlockCols> block() const {
-        return EigenStorage<Scalar_, BlockRows, BlockCols>{
-            matrix_.template block<static_cast<int>(BlockRows), static_cast<int>(BlockCols)>(
-                static_cast<int>(StartRow), static_cast<int>(StartCol)).eval()};
+        requires (StartRow + BlockRows <= Rows) && (StartCol + BlockCols <= Cols)
+    [[nodiscard]] auto block() const {
+        auto expr = data_.template block<static_cast<int>(BlockRows), static_cast<int>(BlockCols)>(
+            static_cast<int>(StartRow), static_cast<int>(StartCol));
+        return EigenStorage<decltype(expr)>{expr};
     }
 };
 
 struct EigenStoragePolicy {
     template <typename Scalar, std::size_t Rows, std::size_t Cols>
-    using type = EigenStorage<Scalar, Rows, Cols>;
+    using type = EigenStorage<Eigen::Matrix<Scalar, static_cast<int>(Rows), static_cast<int>(Cols)>>;
 };
 
 } // namespace tsm::detail

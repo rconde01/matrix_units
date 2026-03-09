@@ -16,15 +16,6 @@
 
 namespace tsm {
 
-namespace detail {
-
-template <typename = void>
-struct DefaultStoragePolicyHelper {
-    using type = ArrayStoragePolicy;
-};
-
-} // namespace detail
-
 using DefaultStoragePolicy = detail::ArrayStoragePolicy;
 
 template <IsIndexType RowIdx, typename Scalar, IsIndexType ColIdx = NoIdx>
@@ -53,27 +44,42 @@ template <typename Scalar_,
           typename RowIdxList_,
           typename ColIdxList_,
           IsMatrixTag MatrixTag_,
-          typename StoragePolicy_ = DefaultStoragePolicy>
+          typename Storage_ = detail::ArrayStorage<Scalar_,
+              detail::size_of_v<RowIdxList_>, detail::size_of_v<ColIdxList_>>>
 class TypeSafeMatrix {
 public:
     using scalar_type    = Scalar_;
     using row_idx_list   = RowIdxList_;
     using col_idx_list   = ColIdxList_;
     using tag_type       = MatrixTag_;
-    using storage_policy = StoragePolicy_;
+    using storage_type   = Storage_;
 
     static constexpr std::size_t num_rows = detail::size_of_v<RowIdxList_>;
     static constexpr std::size_t num_cols = detail::size_of_v<ColIdxList_>;
 
-    using storage_type = typename StoragePolicy_::template type<Scalar_, num_rows, num_cols>;
-
 private:
-    storage_type storage_{};
+    Storage_ storage_{};
 
 public:
     TypeSafeMatrix() = default;
 
-    explicit TypeSafeMatrix(storage_type s) : storage_(std::move(s)) {}
+    explicit TypeSafeMatrix(Storage_ s) : storage_(std::move(s)) {}
+
+    // Converting constructor: evaluates expression-typed storage into concrete storage
+    template <typename OtherStorage>
+        requires (!std::same_as<Storage_, std::remove_cvref_t<OtherStorage>>)
+              && std::constructible_from<Storage_, const OtherStorage&>
+    TypeSafeMatrix(const TypeSafeMatrix<Scalar_, RowIdxList_, ColIdxList_, MatrixTag_, OtherStorage>& other)
+        : storage_(other.storage()) {}
+
+    // Converting assignment from expression-typed storage
+    template <typename OtherStorage>
+        requires (!std::same_as<Storage_, std::remove_cvref_t<OtherStorage>>)
+              && std::constructible_from<Storage_, const OtherStorage&>
+    TypeSafeMatrix& operator=(const TypeSafeMatrix<Scalar_, RowIdxList_, ColIdxList_, MatrixTag_, OtherStorage>& other) {
+        storage_ = Storage_(other.storage());
+        return *this;
+    }
 
     template <typename... Entries>
         requires (sizeof...(Entries) == num_rows * num_cols) &&
@@ -133,8 +139,8 @@ public:
         at<RowIdx, ColIdx>() = e.value;
     }
 
-    [[nodiscard]] const storage_type& storage() const { return storage_; }
-    [[nodiscard]] storage_type& storage() { return storage_; }
+    [[nodiscard]] const Storage_& storage() const { return storage_; }
+    [[nodiscard]] Storage_& storage() { return storage_; }
 
     [[nodiscard]] Scalar_& rawAt(std::size_t row, std::size_t col) {
         return storage_(row, col);
@@ -147,16 +153,18 @@ public:
         requires (N <= num_rows) && (num_cols == 1)
     [[nodiscard]] auto head() const {
         using SubRows = detail::head_t<RowIdxList_, N>;
-        return TypeSafeMatrix<Scalar_, SubRows, ColIdxList_, MatrixTag_, StoragePolicy_>{
-            storage_.template block<0, 0, N, 1>()};
+        auto result_storage = storage_.template block<0, 0, N, 1>();
+        return TypeSafeMatrix<Scalar_, SubRows, ColIdxList_, MatrixTag_, decltype(result_storage)>{
+            std::move(result_storage)};
     }
 
     template <std::size_t N>
         requires (N <= num_rows) && (num_cols == 1)
     [[nodiscard]] auto tail() const {
         using SubRows = detail::tail_t<RowIdxList_, num_rows - N>;
-        return TypeSafeMatrix<Scalar_, SubRows, ColIdxList_, MatrixTag_, StoragePolicy_>{
-            storage_.template block<num_rows - N, 0, N, 1>()};
+        auto result_storage = storage_.template block<num_rows - N, 0, N, 1>();
+        return TypeSafeMatrix<Scalar_, SubRows, ColIdxList_, MatrixTag_, decltype(result_storage)>{
+            std::move(result_storage)};
     }
 
     template <std::size_t RowStart, std::size_t RowCount,
@@ -166,36 +174,43 @@ public:
     [[nodiscard]] auto block() const {
         using SubRows = detail::sub_list_t<RowIdxList_, RowStart, RowCount>;
         using SubCols = detail::sub_list_t<ColIdxList_, ColStart, ColCount>;
-        return TypeSafeMatrix<Scalar_, SubRows, SubCols, MatrixTag_, StoragePolicy_>{
-            storage_.template block<RowStart, ColStart, RowCount, ColCount>()};
+        auto result_storage = storage_.template block<RowStart, ColStart, RowCount, ColCount>();
+        return TypeSafeMatrix<Scalar_, SubRows, SubCols, MatrixTag_, decltype(result_storage)>{
+            std::move(result_storage)};
     }
 
     template <typename Other>
         requires detail::Addable<TypeSafeMatrix, Other>
     [[nodiscard]] auto operator+(const Other& other) const {
         using ResultTag = addition_result_tag_t<MatrixTag_, typename Other::tag_type>;
-        return TypeSafeMatrix<Scalar_, RowIdxList_, ColIdxList_, ResultTag, StoragePolicy_>{
-            storage_ + other.storage()};
+        auto result_storage = storage_ + other.storage();
+        return TypeSafeMatrix<Scalar_, RowIdxList_, ColIdxList_, ResultTag, decltype(result_storage)>{
+            std::move(result_storage)};
     }
 
     template <typename Other>
         requires detail::Subtractable<TypeSafeMatrix, Other>
     [[nodiscard]] auto operator-(const Other& other) const {
         using ResultTag = subtraction_result_tag_t<MatrixTag_, typename Other::tag_type>;
-        return TypeSafeMatrix<Scalar_, RowIdxList_, ColIdxList_, ResultTag, StoragePolicy_>{
-            storage_ - other.storage()};
+        auto result_storage = storage_ - other.storage();
+        return TypeSafeMatrix<Scalar_, RowIdxList_, ColIdxList_, ResultTag, decltype(result_storage)>{
+            std::move(result_storage)};
     }
 
-    [[nodiscard]] TypeSafeMatrix operator*(Scalar_ s) const {
-        return TypeSafeMatrix{storage_ * s};
+    [[nodiscard]] auto operator*(Scalar_ s) const {
+        auto result_storage = storage_ * s;
+        return TypeSafeMatrix<Scalar_, RowIdxList_, ColIdxList_, MatrixTag_, decltype(result_storage)>{
+            std::move(result_storage)};
     }
 
-    friend TypeSafeMatrix operator*(Scalar_ s, const TypeSafeMatrix& m) {
+    friend auto operator*(Scalar_ s, const TypeSafeMatrix& m) {
         return m * s;
     }
 
-    [[nodiscard]] TypeSafeMatrix operator/(Scalar_ s) const {
-        return TypeSafeMatrix{storage_ / s};
+    [[nodiscard]] auto operator/(Scalar_ s) const {
+        auto result_storage = storage_ / s;
+        return TypeSafeMatrix<Scalar_, RowIdxList_, ColIdxList_, MatrixTag_, decltype(result_storage)>{
+            std::move(result_storage)};
     }
 
     template <typename Other>
@@ -203,18 +218,22 @@ public:
     [[nodiscard]] auto operator*(const Other& other) const {
         using ResultTag = multiplication_result_tag_t<MatrixTag_, typename Other::tag_type>;
         using ResultCols = typename Other::col_idx_list;
-        return TypeSafeMatrix<Scalar_, RowIdxList_, ResultCols, ResultTag, StoragePolicy_>{
-            storage_.multiply(other.storage())};
+        auto result_storage = storage_.multiply(other.storage());
+        return TypeSafeMatrix<Scalar_, RowIdxList_, ResultCols, ResultTag, decltype(result_storage)>{
+            std::move(result_storage)};
     }
 
-    [[nodiscard]] TypeSafeMatrix operator-() const {
-        return TypeSafeMatrix{-storage_};
+    [[nodiscard]] auto operator-() const {
+        auto result_storage = -storage_;
+        return TypeSafeMatrix<Scalar_, RowIdxList_, ColIdxList_, MatrixTag_, decltype(result_storage)>{
+            std::move(result_storage)};
     }
 
     [[nodiscard]] auto transpose() const {
         using TTag = transpose_tag_t<MatrixTag_>;
-        return TypeSafeMatrix<Scalar_, ColIdxList_, RowIdxList_, TTag, StoragePolicy_>{
-            storage_.transpose()};
+        auto result_storage = storage_.transpose();
+        return TypeSafeMatrix<Scalar_, ColIdxList_, RowIdxList_, TTag, decltype(result_storage)>{
+            std::move(result_storage)};
     }
 
     [[nodiscard]] bool operator==(const TypeSafeMatrix& other) const {
@@ -228,7 +247,7 @@ public:
     [[nodiscard]] static TypeSafeMatrix identity()
         requires (num_rows == num_cols)
     {
-        return TypeSafeMatrix{storage_type::identity()};
+        return TypeSafeMatrix{Storage_::identity()};
     }
 
     [[nodiscard]] Scalar_ squaredNorm() const
@@ -301,8 +320,8 @@ private:
 };
 
 template <typename Scalar, typename RowIdxList, IsMatrixTag Tag = VectorTag,
-          typename StoragePolicy = DefaultStoragePolicy>
+          typename Storage = detail::ArrayStorage<Scalar, detail::size_of_v<RowIdxList>, 1>>
 using TypeSafeVector = TypeSafeMatrix<Scalar, RowIdxList,
-                                      detail::TypeList<NoIdx>, Tag, StoragePolicy>;
+                                      detail::TypeList<NoIdx>, Tag, Storage>;
 
 } // namespace tsm
